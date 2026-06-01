@@ -1,0 +1,12 @@
+{
+  "rules": {
+    ".read": false,
+    ".write": false,
+    "gestao-escolar": {
+      "estado-geral": {
+        ".read": true,
+        ".write": true
+      }
+    }
+  }
+}
