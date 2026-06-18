@@ -445,6 +445,15 @@ function render() {
   bindViewEvents();
 }
 
+function navigateToRoute(route) {
+  if (!routes.some((item) => item[0] === route)) return;
+  activeRoute = route;
+  history.replaceState(null, "", `#${activeRoute}`);
+  query = "";
+  statusFilter = "all";
+  render();
+}
+
 function statCards() {
   const units = activeUnit === "all" ? state.units : state.units.filter((unit) => unit.id === activeUnit);
   const students = filteredByUnit(state.students);
@@ -714,7 +723,7 @@ function softwareLauncherGrid() {
           </div>
           <p class="muted">${item.description}</p>
           <small class="muted">${item.channel} - ultima sincronizacao em ${formatDate(item.lastSync)}</small>
-          <button class="primary full" data-action="launch-software" data-id="${item.id}">Abrir</button>
+          <a class="primary full app-link" href="#${item.route || integrationRoute(item.name)}" data-route="${item.route || integrationRoute(item.name)}">Abrir</a>
         </article>
       `).join("")}
     </div>
@@ -1198,10 +1207,7 @@ function profileForm() {
 function launchSoftware(id) {
   const integration = state.integrations.find((item) => item.id === id);
   if (!integration) return;
-  activeRoute = integration.route || integrationRoute(integration.name);
-  query = "";
-  statusFilter = "all";
-  render();
+  navigateToRoute(integration.route || integrationRoute(integration.name));
 }
 
 function toggleStudent(id) {
@@ -1262,11 +1268,7 @@ document.addEventListener("click", (event) => {
   const routeButton = event.target.closest("[data-route]");
   if (!routeButton) return;
   event.preventDefault();
-  activeRoute = routeButton.dataset.route;
-  history.replaceState(null, "", `#${activeRoute}`);
-  query = "";
-  statusFilter = "all";
-  render();
+  navigateToRoute(routeButton.dataset.route);
 });
 
 document.querySelector("#unit-filter").addEventListener("change", (event) => {
