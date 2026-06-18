@@ -182,7 +182,7 @@ function seedData() {
     category: book[2],
     unitId: units[index % units.length].id,
     copies: 10 + index,
-    available: 7 + (index % 3),
+    available: 10 + index,
     status: index === 4 ? "Manutencao" : "Disponivel",
   }));
 
@@ -195,6 +195,10 @@ function seedData() {
     dueDate: addDays(today, index === 1 ? -1 : 8 + index).toISOString().slice(0, 10),
     returnedAt: "",
   }));
+  libraryLoans.forEach((loan) => {
+    const book = libraryBooks.find((item) => item.id === loan.bookId);
+    if (book) book.available = Math.max(0, book.available - 1);
+  });
 
   const mesarioProcesses = [
     {
@@ -283,6 +287,22 @@ function normalizeState(payload) {
   if (!Array.isArray(payload.profiles) || !payload.profiles.length) {
     payload.profiles = makeDefaultProfiles();
   }
+  normalizeLibraryInventory(payload);
+  return payload;
+}
+
+function normalizeLibraryInventory(payload) {
+  if (!Array.isArray(payload.libraryBooks) || !Array.isArray(payload.libraryLoans)) return payload;
+  payload.libraryBooks = payload.libraryBooks.map((book) => {
+    const copies = Math.max(Number(book.copies) || 0, 0);
+    const activeLoans = payload.libraryLoans.filter((loan) => loan.bookId === book.id && !loan.returnedAt).length;
+    return {
+      ...book,
+      copies,
+      available: Math.max(copies - activeLoans, 0),
+      status: book.status || "Disponivel",
+    };
+  });
   return payload;
 }
 
@@ -651,28 +671,64 @@ function renderGrades() {
   `;
 }
 
+function loanStatus(loan) {
+  if (loan.returnedAt) return { label: `Devolvido em ${formatDate(loan.returnedAt)}`, className: "" };
+  if (new Date(`${loan.dueDate}T23:59:59`) < today) return { label: "Atrasado", className: "bad" };
+  return { label: "Em dia", className: "" };
+}
+
+function matchesLibraryLoan(loan) {
+  if (!query.trim()) return true;
+  const status = loanStatus(loan).label;
+  const text = `${bookName(loan.bookId)} ${studentName(loan.studentId)} ${unitName(loan.unitId)} ${status}`.toLowerCase();
+  return text.includes(query.toLowerCase());
+}
+
 function renderLibrary() {
-  const loansLate = filteredByUnit(state.libraryLoans).filter((loan) => !loan.returnedAt && new Date(`${loan.dueDate}T23:59:59`) < today).length;
+  const books = filteredByUnit(state.libraryBooks).filter((book) => matches(book, ["title", "author", "category"]));
+  const loans = filteredByUnit(state.libraryLoans).filter((loan) => matchesLibraryLoan(loan));
+  const activeLoans = filteredByUnit(state.libraryLoans).filter((loan) => !loan.returnedAt);
+  const loansLate = activeLoans.filter((loan) => loanStatus(loan).className === "bad").length;
   return `
     <div class="stats">
       <div class="stat"><span>Obras cadastradas</span><strong>${filteredByUnit(state.libraryBooks).length}</strong></div>
       <div class="stat"><span>Exemplares</span><strong>${filteredByUnit(state.libraryBooks).reduce((sum, book) => sum + book.copies, 0)}</strong></div>
-      <div class="stat"><span>Emprestimos ativos</span><strong>${filteredByUnit(state.libraryLoans).filter((loan) => !loan.returnedAt).length}</strong></div>
+      <div class="stat"><span>Emprestimos ativos</span><strong>${activeLoans.length}</strong></div>
       <div class="stat"><span>Atrasos</span><strong>${loansLate}</strong></div>
     </div>
-    ${toolbar("Buscar obra, autor ou categoria", "Novo livro", "book")}
+    ${toolbar("Buscar obra, autor, categoria, aluno ou situacao", "Novo livro", "book")}
     <section class="panel table-wrap">
+      <div class="panel-head"><h2>Acervo</h2></div>
       <table>
         <thead><tr><th>Obra</th><th>Unidade</th><th>Exemplares</th><th>Status</th><th>Acoes</th></tr></thead>
-        <tbody>${filteredByUnit(state.libraryBooks).filter((book) => matches(book, ["title", "author", "category"])).map((book) => `
+        <tbody>${books.map((book) => `
           <tr>
             <td><strong>${book.title}</strong><br><span class="muted">${book.author} - ${book.category}</span></td>
             <td>${unitName(book.unitId)}</td>
             <td>${book.available} disponiveis de ${book.copies}</td>
             <td><span class="badge ${book.status === "Manutencao" ? "warn" : ""}">${book.status}</span></td>
-            <td><button class="link-btn" data-action="loan-book" data-id="${book.id}">Emprestar</button></td>
+            <td><button class="link-btn" data-action="loan-book" data-id="${book.id}" ${book.status === "Manutencao" || book.available < 1 ? "disabled" : ""}>Emprestar</button></td>
           </tr>
-        `).join("")}</tbody>
+        `).join("") || `<tr><td colspan="5"><div class="empty">Nenhuma obra encontrada.</div></td></tr>`}</tbody>
+      </table>
+    </section>
+    <section class="panel table-wrap library-loans">
+      <div class="panel-head"><h2>Circulacao</h2></div>
+      <table>
+        <thead><tr><th>Obra</th><th>Aluno</th><th>Retirada</th><th>Vencimento</th><th>Situacao</th><th>Acoes</th></tr></thead>
+        <tbody>${loans.map((loan) => {
+          const status = loanStatus(loan);
+          return `
+            <tr>
+              <td><strong>${bookName(loan.bookId)}</strong><br><span class="muted">${unitName(loan.unitId)}</span></td>
+              <td>${studentName(loan.studentId)}</td>
+              <td>${formatDate(loan.startDate)}</td>
+              <td>${formatDate(loan.dueDate)}</td>
+              <td><span class="badge ${status.className}">${status.label}</span></td>
+              <td>${loan.returnedAt ? `<span class="muted">Finalizado</span>` : `<button class="link-btn" data-action="return-book" data-id="${loan.id}">Devolver</button>`}</td>
+            </tr>
+          `;
+        }).join("") || `<tr><td colspan="6"><div class="empty">Nenhum emprestimo encontrado.</div></td></tr>`}</tbody>
       </table>
     </section>
   `;
@@ -923,6 +979,7 @@ function handleAction(action, id) {
     "new-grade": () => gradeForm(),
     "new-book": () => bookForm(),
     "loan-book": () => loanBookForm(id),
+    "return-book": () => returnBook(id),
     "new-mesario": () => mesarioForm(),
     "new-integration": () => integrationForm(),
     "new-profile": () => profileForm(),
@@ -1110,8 +1167,12 @@ function loanBookForm(bookId = "") {
   `, (data) => {
     const book = state.libraryBooks.find((item) => item.id === data.get("bookId"));
     const student = state.students.find((item) => item.id === data.get("studentId"));
-    if (!book || book.available < 1) return alert("Nao ha exemplar disponivel.");
+    if (!book) return alert("Obra nao localizada.");
+    if (!student) return alert("Aluno nao localizado.");
+    if (book.status === "Manutencao") return alert("Obra em manutencao nao pode ser emprestada.");
+    if (book.available < 1) return alert("Nao ha exemplar disponivel.");
     if (student.libraryBlocked) return alert("Aluno bloqueado na biblioteca.");
+    if (new Date(data.get("dueDate")) < new Date(data.get("startDate"))) return alert("Vencimento deve ser posterior a retirada.");
     book.available -= 1;
     state.libraryLoans.unshift({
       id: crypto.randomUUID(),
@@ -1124,6 +1185,15 @@ function loanBookForm(bookId = "") {
     });
     saveState(`Emprestimo registrado para ${student.name}.`);
   });
+}
+
+function returnBook(id) {
+  const loan = state.libraryLoans.find((item) => item.id === id);
+  if (!loan || loan.returnedAt) return;
+  const book = state.libraryBooks.find((item) => item.id === loan.bookId);
+  loan.returnedAt = today.toISOString().slice(0, 10);
+  if (book) book.available = Math.min(book.copies, book.available + 1);
+  saveState(`Devolucao registrada para ${bookName(loan.bookId)}.`);
 }
 
 function mesarioForm() {
